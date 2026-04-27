@@ -66,6 +66,16 @@
  * Docs: https://developers.google.com/calendar/api/v3/reference/events#resource
  */
 
+// Returns the day after dateStr (YYYY-MM-DD) as a YYYY-MM-DD string.
+// Google Calendar all-day events use an exclusive end date: an event "on" May 3
+// must have end.date = "2026-05-04". This function does that shift.
+// UTC arithmetic avoids DST edge cases.
+function addOneDay(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const next = new Date(Date.UTC(y, m - 1, d + 1));
+  return next.toISOString().split('T')[0];
+}
+
 // Parses a time string from Notion (e.g. "5:30 PM" or "17:30") and combines it
 // with a date string (e.g. "2026-05-01") to produce a dateTime string.
 // Returns null if the time string is missing or in an unrecognised format.
@@ -105,6 +115,23 @@ function mapNotionToGoogleEvent(page) {
   // ↓ Replace YOUR_CODE_HERE
   const dateStart = YOUR_CODE_HERE;
 
+  // STRETCH GOAL — multi-day events:
+  // Notion's Timeline field also has a .end property for date ranges.
+  // If the event spans multiple days (e.g. a camp or workshop), .end holds the
+  // last inclusive day as a string like "2026-05-03".
+  //
+  // Google Calendar all-day events use an *exclusive* end date — the day AFTER
+  // the last day the event appears. So a Notion range of May 1–3 must become:
+  //   start: { date: "2026-05-01" }
+  //   end:   { date: "2026-05-04" }   ← addOneDay("2026-05-03")
+  //
+  // When there is no end date (single-day event), Google Calendar still requires
+  // an end — we use dateStart (same day = 1-day all-day event).
+  const rawDateEnd = props.Timeline?.date?.end;
+  const dateEnd = rawDateEnd ? rawDateEnd.split('T')[0] : null;
+  // Exclusive end for Google Calendar: shift end by +1 day, or mirror start.
+  const googleEndDate = dateEnd ? addOneDay(dateEnd) : dateStart;
+
   // TODO 3: Return null if there is no date.
   // The sync runner checks for this and skips the page safely.
   //
@@ -114,8 +141,10 @@ function mapNotionToGoogleEvent(page) {
   // TODO 4: Build the base Google Calendar event object.
   //
   // Create a const called `googleEvent` with three fields: summary, start, and end.
-  // For an all-day event, start and end both use { date: dateStart }.
-  // Don't return it yet — the pre-built section below adds more fields to it first.
+  // For the start, use { date: dateStart }.
+  // For the end, use { date: googleEndDate } — this handles both single-day events
+  // (where googleEndDate equals dateStart) and multi-day ranges (where it is
+  // dateStart + 1 or the Notion end date shifted by one day).
   //
   // ↓ Uncomment this line and replace YOUR_CODE_HERE with the object
   // const googleEvent = YOUR_CODE_HERE;
