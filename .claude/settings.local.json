@@ -7,7 +7,8 @@
       "Bash(node --check sync/syncRunner.js)",
       "Bash(node --check sync/mapFields.js)",
       "Bash(node --check sync/fetchNotion.js)",
-      "Bash(node --check sync/googleCalendar.js)"
+      "Bash(node --check sync/googleCalendar.js)",
+      "WebFetch(domain:fyr-resources.vercel.app)"
     ]
   }
 }
