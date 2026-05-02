@@ -104,6 +104,12 @@ function mapNotionToGoogleEvent(page) {
   // You want the plain_text field from the first element ([0]).
   // If the array is empty or missing, fall back to the string '(Untitled)'.
   //
+  // EXAMPLE: accessing a 'Label' title property with a fallback:
+  //   const label = props.Label?.title?.[0]?.plain_text || '(No label)';
+  //
+  // title and rich_text both use the same array structure — [0].plain_text
+  // gives you the text from the first element.
+  //
   // ↓ Remove this comment, keep the const, and replace YOUR_CODE_HERE
   const title = YOUR_CODE_HERE;
 
@@ -112,24 +118,18 @@ function mapNotionToGoogleEvent(page) {
   // Timeline.date.start is a string like "2026-05-01" or "2026-05-01T17:30:00+10:00".
   // Use .split('T')[0] to strip any time component and keep only YYYY-MM-DD.
   //
+  // EXAMPLE: extracting the date part from a 'Deadline' property:
+  //   const deadline = props.Deadline?.date?.start?.split('T')[0];
+  //
+  //   "2026-05-01T17:30:00+10:00".split('T')[0]  →  "2026-05-01"
+  //   "2026-05-01".split('T')[0]                 →  "2026-05-01"  (no T, unchanged)
+  //
   // ↓ Replace YOUR_CODE_HERE
   const dateStart = YOUR_CODE_HERE;
 
-  // STRETCH GOAL — multi-day events:
-  // Notion's Timeline field also has a .end property for date ranges.
-  // If the event spans multiple days (e.g. a camp or workshop), .end holds the
-  // last inclusive day as a string like "2026-05-03".
-  //
-  // Google Calendar all-day events use an *exclusive* end date — the day AFTER
-  // the last day the event appears. So a Notion range of May 1–3 must become:
-  //   start: { date: "2026-05-01" }
-  //   end:   { date: "2026-05-04" }   ← addOneDay("2026-05-03")
-  //
-  // When there is no end date (single-day event), Google Calendar still requires
-  // an end — we use dateStart (same day = 1-day all-day event).
+  // Multi-day event handling — already implemented, no changes needed here.
   const rawDateEnd = props.Timeline?.date?.end;
   const dateEnd = rawDateEnd ? rawDateEnd.split('T')[0] : null;
-  // Exclusive end for Google Calendar: shift end by +1 day, or mirror start.
   const googleEndDate = dateEnd ? addOneDay(dateEnd) : dateStart;
 
   // TODO 3: Return null if there is no date.
@@ -142,9 +142,17 @@ function mapNotionToGoogleEvent(page) {
   //
   // Create a const called `googleEvent` with three fields: summary, start, and end.
   // For the start, use { date: dateStart }.
-  // For the end, use { date: googleEndDate } — this handles both single-day events
-  // (where googleEndDate equals dateStart) and multi-day ranges (where it is
-  // dateStart + 1 or the Notion end date shifted by one day).
+  // For the end, use { date: googleEndDate }.
+  //
+  // EXAMPLE: a Slack message follows the same idea — one object, multiple fields:
+  //   const slackMessage = {
+  //     channel: '#events',
+  //     text: title,
+  //     username: 'EventBot'
+  //   };
+  //
+  // Your googleEvent is the same pattern, just with the field names Google Calendar expects.
+  // summary is the event title.
   //
   // ↓ Uncomment this line and replace YOUR_CODE_HERE with the object
   // const googleEvent = YOUR_CODE_HERE;
@@ -175,13 +183,15 @@ function mapNotionToGoogleEvent(page) {
 
   // TODO 5: Extract the venue and set it as the event location.
   //
-  // Venue is a rich_text field — the exact same access pattern as Name in TODO 1,
-  // except the property name has a space so you must use bracket notation:
-  //   props['Venue']  ← correct for names with spaces or special characters
-  //   props.Venue     ← also works here, but get used to brackets for special names
+  // Venue is a rich_text field — the same access pattern as Name in TODO 1,
+  // but use bracket notation since you'll need it for the emoji fields later:
+  //   props['Venue']?.rich_text?.[0]?.plain_text
   //
   // Only set googleEvent.location if a venue exists — don't set it to undefined.
-  // Hint: use an if statement, same as the time fields above.
+  //
+  // EXAMPLE: setting a colour field only when one exists:
+  //   const colour = props['Colour']?.rich_text?.[0]?.plain_text;
+  //   if (colour) googleEvent.colorId = colour;
   //
   // ↓ Replace YOUR_CODE_HERE on both lines
   const venue = YOUR_CODE_HERE;
@@ -194,13 +204,18 @@ function mapNotionToGoogleEvent(page) {
   //   rich_text: props['🔹 Caption']?.rich_text?.[0]?.plain_text
   //   url:       props['🔹 Registration Link']?.url   ← just .url, no array
   //
-  // The description should look like this when both exist:
-  //   "Some caption text here
+  // EXAMPLE: building a bio from an optional tagline and optional website:
+  //   const tagline = props['Tagline']?.rich_text?.[0]?.plain_text;
+  //   const website = props['Website']?.url;
   //
-  //    Register: https://forms.gle/..."
+  //   const parts = [
+  //     tagline,
+  //     website ? `Visit us: ${website}` : null,
+  //   ].filter(Boolean);
+  //   const bio = parts.join('\n\n');
   //
-  // Hint: build both values first, then combine them. Only include each part
-  // if it exists. You can join two strings with '\n\n' between them for a blank line.
+  // Caption and Registration Link follow the same pattern — extract each one
+  // first, then the .filter(Boolean) and .join below handle the combining.
   //
   // ↓ Replace each YOUR_CODE_HERE
   const caption = YOUR_CODE_HERE;

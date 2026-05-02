@@ -45,6 +45,33 @@
  * Date filter conditions: https://developers.notion.com/reference/post-database-query-filter#date-filter-condition
  *
  * -----------------------------------------------------------------------------
+ * WORKED EXAMPLE (different database, same idea)
+ * -----------------------------------------------------------------------------
+ * Imagine a "Tasks" database. You want tasks where:
+ *   - Status is 'Active' OR Status is 'In Progress'   ← OR block
+ *   - AND DueDate is on or after 1 July this year     ← date condition
+ *
+ * Step 1 — build the date string:
+ *   const midYear = new Date().getFullYear() + '-07-01';
+ *   // midYear is now e.g. '2026-07-01'
+ *
+ * Step 2 — build the filter:
+ *   filter: {
+ *     and: [
+ *       {
+ *         or: [
+ *           { property: 'Status', select: { equals: 'Active' } },
+ *           { property: 'Status', select: { equals: 'In Progress' } }
+ *         ]
+ *       },
+ *       { property: 'DueDate', date: { on_or_after: midYear } }
+ *     ]
+ *   }
+ *
+ * Your task uses the same pattern — `and` wrapping an `or` block plus a date
+ * condition — just with different property names and values from your database.
+ *
+ * -----------------------------------------------------------------------------
  * PAGINATION
  * -----------------------------------------------------------------------------
  * Notion returns at most 100 results per request. The do/while loop below

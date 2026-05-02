@@ -76,6 +76,18 @@ const CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID;
 // Then return the new event's Google ID from: response.data.id
 // (syncRunner.js stores this ID so it can update/delete the event later)
 //
+// EXAMPLE: creating a task using a fictional Todo API client:
+//   async function createTask(taskData) {
+//     const response = await todoClient.tasks.create({
+//       listId: LIST_ID,
+//       requestBody: taskData,
+//     });
+//     return response.data.id;
+//   }
+//
+// Your createEvent follows the same shape — call .insert, pass the required
+// fields as an object, then return response.data.id.
+//
 // Docs: https://developers.google.com/calendar/api/v3/reference/events/insert
 async function createEvent(eventData) {
   // const response = await calendar.events.???
@@ -91,6 +103,17 @@ async function createEvent(eventData) {
 //
 // You don't need to return anything — just await the call.
 //
+// EXAMPLE: updating a task by ID using a fictional Todo API client:
+//   async function updateTask(taskId, taskData) {
+//     await todoClient.tasks.patch({
+//       listId: LIST_ID,
+//       taskId: taskId,
+//       requestBody: taskData,
+//     });
+//   }
+//
+// Your updateEvent follows the same shape — await the call, no return needed.
+//
 // Docs: https://developers.google.com/calendar/api/v3/reference/events/patch
 async function updateEvent(googleEventId, eventData) {
   // await calendar.events.???
@@ -103,6 +126,16 @@ async function updateEvent(googleEventId, eventData) {
 //   - eventId: googleEventId
 //
 // You don't need to return anything — just await the call.
+//
+// EXAMPLE: deleting a task by ID using a fictional Todo API client:
+//   async function deleteTask(taskId) {
+//     await todoClient.tasks.delete({
+//       listId: LIST_ID,
+//       taskId: taskId,
+//     });
+//   }
+//
+// Your deleteEvent follows the same shape — no requestBody needed, just the IDs.
 //
 // Docs: https://developers.google.com/calendar/api/v3/reference/events/delete
 async function deleteEvent(googleEventId) {
