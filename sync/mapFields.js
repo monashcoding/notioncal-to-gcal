@@ -70,6 +70,7 @@
 // Google Calendar all-day events use an exclusive end date: an event "on" May 3
 // must have end.date = "2026-05-04". This function does that shift.
 // UTC arithmetic avoids DST edge cases.
+
 function addOneDay(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number);
   const next = new Date(Date.UTC(y, m - 1, d + 1));
@@ -95,9 +96,11 @@ function buildDateTime(dateStr, timeStr) {
   return `${dateStr}T${String(hours).padStart(2, '0')}:${minutes}:00`;
 }
 
+
 function mapNotionToGoogleEvent(page) {
   const props = page.properties;
 
+  console.log(JSON.stringify(page.properties, null, 2));
   // TODO 1: Extract the event title from the Name property.
   //
   // From the console.log output, Name.title is an array.
@@ -111,7 +114,7 @@ function mapNotionToGoogleEvent(page) {
   // gives you the text from the first element.
   //
   // ↓ Remove this comment, keep the const, and replace YOUR_CODE_HERE
-  const title = YOUR_CODE_HERE;
+  const title = props.Name?.title?.[0]?.plain_text || '(Untitled)';
 
   // TODO 2: Extract the start date from the Timeline property.
   //
@@ -125,7 +128,7 @@ function mapNotionToGoogleEvent(page) {
   //   "2026-05-01".split('T')[0]                 →  "2026-05-01"  (no T, unchanged)
   //
   // ↓ Replace YOUR_CODE_HERE
-  const dateStart = YOUR_CODE_HERE;
+  const dateStart = props.Timeline?.date?.start?.split('T')[0];
 
   // Multi-day event handling — already implemented, no changes needed here.
   const rawDateEnd = props.Timeline?.date?.end;
@@ -136,7 +139,7 @@ function mapNotionToGoogleEvent(page) {
   // The sync runner checks for this and skips the page safely.
   //
   // ↓ Uncomment this line (remove the // at the start)
-  // if (!dateStart) { return null; }
+  if (!dateStart) { return null; }
 
   // TODO 4: Build the base Google Calendar event object.
   //
@@ -155,7 +158,11 @@ function mapNotionToGoogleEvent(page) {
   // summary is the event title.
   //
   // ↓ Uncomment this line and replace YOUR_CODE_HERE with the object
-  // const googleEvent = YOUR_CODE_HERE;
+  const googleEvent = {
+    summary: title,
+    start: { date: dateStart },
+    end: { date: googleEndDate },
+  };
 
   // -----------------------------------------------------------------------------
   // The fields below are already implemented — read them to understand the pattern,
@@ -194,8 +201,8 @@ function mapNotionToGoogleEvent(page) {
   //   if (colour) googleEvent.colorId = colour;
   //
   // ↓ Replace YOUR_CODE_HERE on both lines
-  const venue = YOUR_CODE_HERE;
-  if (venue) googleEvent.location = YOUR_CODE_HERE;
+  const venue = props['Venue']?.rich_text?.[0]?.plain_text;
+  if (venue) googleEvent.location = venue;
 
   // TODO 6: Build the event description from Caption and Registration Link.
   //
@@ -218,8 +225,8 @@ function mapNotionToGoogleEvent(page) {
   // first, then the .filter(Boolean) and .join below handle the combining.
   //
   // ↓ Replace each YOUR_CODE_HERE
-  const caption = YOUR_CODE_HERE;
-  const registrationLink = YOUR_CODE_HERE;
+  const caption = props['🔹 Caption']?.rich_text?.[0]?.plain_text;
+  const registrationLink = props['🔹 Registration Link']?.url;
 
   const descriptionParts = [
     caption,

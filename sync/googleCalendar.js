@@ -22,7 +22,7 @@ async function updateEvent(googleEventId, eventData) {
 }
 
 async function deleteEvent(googleEventId) {
-  await calendar.events.delete ({
+  await calendar.events.delete({
     calendarId: CALENDAR_ID,
     eventId: googleEventId,
   });
