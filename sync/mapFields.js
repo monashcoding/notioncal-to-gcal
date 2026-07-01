@@ -10,15 +10,19 @@ function addOneDay(dateStr) {
 function buildDateTime(dateStr, timeStr) {
   if (!timeStr) return null;
 
-  const match = timeStr.trim().match(/^(\d{1,2}):(\d{2})\s*(am|pm)?$/i);
+  const match = timeStr.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);
   if (!match) return null;
 
   let hours = parseInt(match[1], 10);
-  const minutes = match[2];
+  const minutes = match[2] ?? '00';
   const period = match[3]?.toLowerCase();
 
-  if (period === 'pm' && hours !== 12) hours += 12;
-  if (period === 'am' && hours === 12) hours = 0;
+  // Default to PM unless AM is explicitly specified
+  if (period === 'am') {
+    if (hours === 12) hours = 0;
+  } else {
+    if (hours !== 12) hours += 12;
+  }
 
   return `${dateStr}T${String(hours).padStart(2, '0')}:${minutes}:00`;
 }
@@ -27,9 +31,6 @@ function buildDateTime(dateStr, timeStr) {
 function mapNotionToGoogleEvent(page) {
   const props = page.properties;
 
-  console.log(JSON.stringify(page.properties, null, 2));
-  
-  
   const title = props.Name?.title?.[0]?.plain_text || '(Untitled)';
 
  
@@ -39,7 +40,7 @@ function mapNotionToGoogleEvent(page) {
   // Multi-day event handling — already implemented, no changes needed here.
   const rawDateEnd = props.Timeline?.date?.end;
   const dateEnd = rawDateEnd ? rawDateEnd.split('T')[0] : null;
-  const googleEndDate = dateEnd ? addOneDay(dateEnd) : dateStart;
+  const googleEndDate = dateEnd ? addOneDay(dateEnd) : addOneDay(dateStart);
  
   
   if (!dateStart) { return null; }

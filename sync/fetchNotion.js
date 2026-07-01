@@ -20,7 +20,8 @@ async function fetchNotionPages() {
               { property: "Type", select: { equals: "Event" } }
             ]
           },
-          { property: "Timeline", date: { on_or_after: cutoff } }
+          { property: "Timeline", date: { on_or_after: cutoff } },
+          { property: "🔹 Sync to Public Calendar", rollup: { any: { checkbox: { equals: true } } } }
         ]
       }
     });

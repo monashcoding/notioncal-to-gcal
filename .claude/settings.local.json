@@ -8,7 +8,13 @@
       "Bash(node --check sync/mapFields.js)",
       "Bash(node --check sync/fetchNotion.js)",
       "Bash(node --check sync/googleCalendar.js)",
-      "WebFetch(domain:fyr-resources.vercel.app)"
+      "WebFetch(domain:fyr-resources.vercel.app)",
+      "Bash(curl -s https://api.notion.com/v1/databases/29c7ff3886cd4fea92400f24d5618388 -H 'Authorization: Bearer ntn_q8061623768adOeJP2hhThbEBgwxIjR4Aj5qQVW6eyZ0eZ' -H 'Notion-Version: 2022-06-28')",
+      "Bash(node -e \"const d=require\\('fs'\\).readFileSync\\('/dev/stdin','utf8'\\); const db=JSON.parse\\(d\\); console.log\\(Object.keys\\(db.properties\\).join\\('\\\\n'\\)\\)\")",
+      "Bash(curl -s https://api.notion.com/v1/pages/33a1e0829dd8809cb7f5ef8bf420c15a -H 'Authorization: Bearer ntn_q8061623768adOeJP2hhThbEBgwxIjR4Aj5qQVW6eyZ0eZ' -H 'Notion-Version: 2022-06-28')",
+      "Bash(node -e \"const d=require\\('fs'\\).readFileSync\\('/dev/stdin','utf8'\\); const page=JSON.parse\\(d\\); Object.entries\\(page.properties\\).forEach\\(\\([k,v]\\) => console.log\\(k, '->', JSON.stringify\\(v\\).substring\\(0,80\\)\\)\\)\")",
+      "Bash(curl -s https://api.notion.com/v1/databases/29c7ff3886cd4fea92400f24d5618388/query -H 'Authorization: Bearer ntn_q8061623768adOeJP2hhThbEBgwxIjR4Aj5qQVW6eyZ0eZ' -H 'Notion-Version: 2022-06-28' -H 'Content-Type: application/json' -d '{\"page_size\":5}')",
+      "Bash(node -e ' *)"
     ]
   }
 }
