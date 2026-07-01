@@ -70,8 +70,8 @@ function mapNotionToGoogleEvent(page) {
   if (venue) googleEvent.location = venue;
 
   
-  const caption = props['🔹 Caption']?.rich_text?.[0]?.plain_text;
-  const registrationLink = props['🔹 Registration Link']?.url;
+  const caption = props['🔹 Caption']?.rollup?.array?.[0]?.rich_text?.[0]?.plain_text;
+  const registrationLink = props['🔹 Registration Link']?.rollup?.array?.[0]?.url;
 
   const descriptionParts = [
     caption,
