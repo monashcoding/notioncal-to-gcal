@@ -46,10 +46,13 @@ function mapNotionToGoogleEvent(page) {
   if (!dateStart) { return null; }
 
   
+  // All-day event by default. `dateTime: null` explicitly clears any stale
+  // dateTime on the existing Google event so events.patch doesn't leave both
+  // `date` and `dateTime` set (which Google rejects as "Invalid start time").
   const googleEvent = {
     summary: title,
-    start: { date: dateStart },
-    end: { date: googleEndDate },
+    start: { date: dateStart, dateTime: null },
+    end: { date: googleEndDate, dateTime: null },
   };
 
 
@@ -59,10 +62,12 @@ function mapNotionToGoogleEvent(page) {
   const endDateTime = buildDateTime(dateStart, endTimeStr);
 
   if (startDateTime) {
-    googleEvent.start = { dateTime: startDateTime, timeZone: 'Australia/Melbourne' };
+    // Timed event. `date: null` clears the all-day `date` field so patch doesn't
+    // leave both `date` and `dateTime` set on a previously all-day event.
+    googleEvent.start = { dateTime: startDateTime, timeZone: 'Australia/Melbourne', date: null };
     googleEvent.end = endDateTime
-      ? { dateTime: endDateTime, timeZone: 'Australia/Melbourne' }
-      : { dateTime: startDateTime, timeZone: 'Australia/Melbourne' };
+      ? { dateTime: endDateTime, timeZone: 'Australia/Melbourne', date: null }
+      : { dateTime: startDateTime, timeZone: 'Australia/Melbourne', date: null };
   }
 
 

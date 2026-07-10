@@ -102,10 +102,17 @@ async function runSync() {
     const existingGoogleId = syncState[page.id];
 
     if (existingGoogleId) {
-      // Page was synced before — update the existing Google event in place
+      // Page was synced before — update the existing Google event in place.
+      // updateEvent returns the live event id: the same id normally, or a new
+      // one if the old event was deleted in Google and had to be recreated.
       try {
-        await updateEvent(existingGoogleId, eventData); // calls YOUR googleCalendar.js
-        console.log(`[${timestamp()}] Updated: "${eventData.summary}"`);
+        const liveGoogleId = await updateEvent(existingGoogleId, eventData); // calls YOUR googleCalendar.js
+        if (liveGoogleId !== existingGoogleId) {
+          syncState[page.id] = liveGoogleId; // remember the recreated event's id
+          console.log(`[${timestamp()}] Recreated (was deleted in Google): "${eventData.summary}"`);
+        } else {
+          console.log(`[${timestamp()}] Updated: "${eventData.summary}"`);
+        }
         updated++;
       } catch (err) {
         console.error(
