@@ -114,7 +114,7 @@ Facebook, and Instagram are fully built but **inert until API access is granted*
 
 | Sink | Blocker before it can post |
 |---|---|
-| Discord events | none — works once the bot is configured |
+| Discord events | none — bot needs **Create Events + Manage Events** + confirm-channel access |
 | LinkedIn (page) | Community Management API approval + page-admin token |
 | Facebook (page) | Meta App Review + Business Verification |
 | Instagram (feed) | Meta App Review + Business Verification + a **public image URL**; no text-only posts |

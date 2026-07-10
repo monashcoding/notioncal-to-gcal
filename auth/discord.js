@@ -5,8 +5,9 @@
 // reactions). Node 18+ ships a global `fetch`, so no dependency is required.
 //
 // Auth is a bot token sent as `Authorization: Bot <token>`. The bot must be a
-// member of the target guild with the relevant permissions (Manage Events for
-// scheduled events; Send Messages / Read Message History / Add Reactions for the
+// member of the target guild with the relevant permissions (Create Events AND
+// Manage Events for scheduled events — Discord splits create vs edit/delete; and
+// View Channel / Send Messages / Read Message History / Add Reactions for the
 // confirm channel).
 
 const API_BASE = 'https://discord.com/api/v10';
