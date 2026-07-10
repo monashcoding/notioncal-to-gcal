@@ -1,0 +1,22 @@
+# Dependencies are installed fresh inside the image
+node_modules
+
+# Secrets and runtime state — provided via env vars and the mounted volume,
+# never baked into the image
+.env
+tokens.json
+sync-state.json
+
+# VCS and local tooling
+.git
+.gitignore
+.claude
+.planning
+.ralph
+.ralphrc
+
+# Docs not needed at runtime
+*.md
+
+# Logs
+npm-debug.log*

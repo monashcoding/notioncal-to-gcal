@@ -19,8 +19,10 @@ const { setStoredTokens } = require('./auth/google');
 const { runSync } = require('./sync/syncRunner');
 
 // Build the full path to tokens.json.
-// __dirname is the directory this file lives in (the project root).
-const tokensPath = path.join(__dirname, 'tokens.json');
+// DATA_DIR lets deployments (e.g. Docker/Dokploy) store tokens.json on a
+// mounted volume; it defaults to __dirname (the project root) for local dev.
+const dataDir = process.env.DATA_DIR || __dirname;
+const tokensPath = path.join(dataDir, 'tokens.json');
 
 // Pre-flight check: if tokens.json doesn't exist, the Google API won't work.
 // process.exit(1) stops the program immediately with an error code.

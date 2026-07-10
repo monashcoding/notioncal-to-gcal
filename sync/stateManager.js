@@ -28,7 +28,10 @@ const path = require('path');
 // __dirname is the directory this file lives in (sync/).
 // path.join(__dirname, '..', 'sync-state.json') goes one level up to the root.
 // Using path.join (instead of a hardcoded string) works on both Mac and Windows.
-const STATE_FILE = path.join(__dirname, '..', 'sync-state.json');
+// DATA_DIR lets deployments (e.g. Docker/Dokploy) point persistent files at a
+// mounted volume. Defaults to the project root so local dev is unchanged.
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..');
+const STATE_FILE = path.join(DATA_DIR, 'sync-state.json');
 
 // Load the saved state from disk.
 // fs.existsSync checks if the file exists — on the very first run it won't,
