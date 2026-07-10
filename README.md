@@ -81,6 +81,55 @@ The mapping between Notion page IDs and Google event IDs is stored in
 
 ---
 
+## Fan-out sinks (Discord events + social posting)
+
+Beyond Google Calendar, a Notion event can fan out to more destinations. All of
+these are **optional and off by default** — if a sink's env vars are missing it is
+inert (silently skipped, never crashes). Every fan-out sink only fires for pages
+whose **`Announce` checkbox** (a new property on the events database) is ticked.
+
+Two kinds of sink:
+
+- **Mirror sinks** — kept exactly in sync with Notion every run (create / update /
+  delete). Google Calendar, and **Discord scheduled events**.
+- **Announce-once sinks** — post once, and only after a human approves. These are
+  the socials: **LinkedIn** (company page), **Facebook** (page), **Instagram** (feed).
+
+### The Discord ✅ approval loop (how socials get published)
+
+Social posts publish live, so a human gates them — implemented by polling, no bot
+gateway needed:
+
+1. Tick `Announce` on an event → on the next run the bot posts a **preview** of the
+   post to a private Discord channel (`DISCORD_CONFIRM_CHANNEL_ID`) and adds a ✅.
+   One preview **per platform**, so you can approve Facebook while holding Instagram.
+2. A human clicks ✅.
+3. A later run reads the reaction and **publishes** to that platform (up to ~30 min
+   later). Once posted it is never touched again.
+
+### Current status
+
+**Discord scheduled events work today** once the bot env vars are set. LinkedIn,
+Facebook, and Instagram are fully built but **inert until API access is granted**:
+
+| Sink | Blocker before it can post |
+|---|---|
+| Discord events | none — works once the bot is configured |
+| LinkedIn (page) | Community Management API approval + page-admin token |
+| Facebook (page) | Meta App Review + Business Verification |
+| Instagram (feed) | Meta App Review + Business Verification + a **public image URL**; no text-only posts |
+
+When access lands, just add the env vars (see `.env.example`) — no code change.
+
+### Adding another platform
+
+Each social platform is one file in `sync/platforms/` exporting
+`{ key, label, isConfigured, buildPreview, publish }`, registered in the
+`SOCIAL_PLATFORMS` list in `sync/syncRunner.js`. The `announceOnce` framework
+(`sync/announce.js`) handles the ✅ approval flow for all of them.
+
+---
+
 ## Adding new Notion fields
 
 All field translation logic lives in **`sync/mapFields.js`** — read a value off
@@ -99,10 +148,15 @@ scripts/setup-auth.js     One-time Google OAuth browser flow
 auth/google.js            OAuth2 client, token helpers
 auth/notion.js            Notion client
 routes/auth.js            Express routes for OAuth callback
+auth/discord.js           Discord REST helper (bot-token fetch wrapper)
 sync/fetchNotion.js       Paginated, filtered fetch from Notion database
 sync/mapFields.js         Notion page → Google Calendar event (edit to add fields)
 sync/googleCalendar.js    Google Calendar create / update / delete wrappers
-sync/stateManager.js      Load and save sync-state.json (honours DATA_DIR)
+sync/mapDiscord.js        Notion page → Discord scheduled-event payload
+sync/discordEvents.js     Discord scheduled-event create / update / delete wrappers
+sync/announce.js          Announce-once framework + Discord ✅ approval loop
+sync/platforms/*.js       One file per social platform (linkedin/facebook/instagram)
+sync/stateManager.js      Load and save sync-state.json (nested; honours DATA_DIR)
 sync/syncRunner.js        Core sync orchestration
 Dockerfile                Container image (node:22-alpine)
 .dockerignore             Excludes secrets, state, node_modules from the image

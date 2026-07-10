@@ -95,4 +95,7 @@ function mapNotionToGoogleEvent(page) {
   return googleEvent;
 }
 
-module.exports = { mapNotionToGoogleEvent };
+// buildDateTime is exported so other sinks (e.g. Discord events) parse the
+// Notion "Event Start/End Time" fields with the exact same rules as Google —
+// keeping every destination in agreement about what time an event starts.
+module.exports = { mapNotionToGoogleEvent, buildDateTime };

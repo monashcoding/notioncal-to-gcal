@@ -38,11 +38,34 @@ const STATE_FILE = path.join(DATA_DIR, 'sync-state.json');
 // so we return an empty object {} instead of crashing.
 // fs.readFileSync reads the file as a string, then JSON.parse converts it
 // back into a JavaScript object (the reverse of JSON.stringify from Lesson 4).
+//
+// STATE SHAPE
+// -----------
+// The state has grown from the original flat form:
+//   { "<notionPageId>": "<googleEventId>" }
+// into a per-page object so one Notion page can track several destinations:
+//   { "<notionPageId>": { google, discord, linkedin, facebook, instagram } }
+//
+// loadState() migrates any legacy string values into { google: "<id>" } on read,
+// so old sync-state.json files keep working with no manual editing. The Google
+// event id always lives at `.google`.
 function loadState() {
   if (!fs.existsSync(STATE_FILE)) {
     return {};
   }
-  return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+  const raw = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+
+  const state = {};
+  for (const [notionId, value] of Object.entries(raw)) {
+    if (typeof value === 'string') {
+      // Legacy flat form: the value was the Google event id directly.
+      state[notionId] = { google: value };
+    } else {
+      // Already the new nested form — keep as-is.
+      state[notionId] = value;
+    }
+  }
+  return state;
 }
 
 // Save the current state to disk, overwriting the previous version.
