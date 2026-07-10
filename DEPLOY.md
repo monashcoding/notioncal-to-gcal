@@ -6,10 +6,15 @@ no inbound traffic — it only needs its two persistent files to survive redeplo
 
 ## 1. Create the service
 
-In Dokploy, create a new **Application** from this Git repo:
+Create a new **Application** in Dokploy sourced from GitHub:
 
+- **Source:** GitHub (via the Dokploy GitHub App — see "Auto-deploy" below to
+  connect it if you haven't already).
+- **Repo:** `monashcoding/notioncal-to-gcal`
 - **Branch:** `main`
-- **Build type:** Dockerfile (the repo's `Dockerfile` is used automatically)
+- **Build Type:** `Dockerfile` (change it from the default Nixpacks — the repo's
+  `Dockerfile` is then used automatically). Leave **Dockerfile Path** = `Dockerfile`
+  and **Build Context** = `.`.
 - No domain / port mapping is needed — this is a background worker, not a web app.
 
 ## 2. Environment variables
@@ -76,7 +81,28 @@ Trigger a deploy. Check the logs — a healthy first run looks like:
 If you see `tokens.json not found. Please run: node scripts/setup-auth.js`, the
 volume mount or the seed step (3–4) is missing.
 
-## Updating
+## Auto-deploy on push (CI/CD)
 
-Push to `main` → redeploy in Dokploy. The `/app/data` volume (tokens + state)
-persists across deploys, so no re-auth and no duplicates.
+This uses Dokploy's native GitHub App integration — no workflow files or secrets
+in the repo. On every push to `main`, Dokploy rebuilds the Dockerfile and
+redeploys automatically.
+
+To enable it:
+
+1. **Connect the GitHub App** (once per Dokploy instance): Dokploy → **Settings →
+   Git → GitHub → Create GitHub App**, then install it on the `monashcoding` org
+   and grant access to this repo. (If your other services already deploy from
+   GitHub, this is already done — reuse the same provider.)
+2. When creating/editing this Application, set its **Source** to that GitHub
+   provider and pick `monashcoding/notioncal-to-gcal` @ `main`.
+3. In the app settings, enable **Auto Deploy**. Dokploy registers a webhook on
+   the repo automatically.
+
+That's it — `git push` to `main` triggers a rebuild + redeploy. The `/app/data`
+volume (tokens + state) persists across deploys, so there's no re-auth and no
+duplicate events.
+
+## Manual redeploy
+
+If you ever need to force one, hit **Deploy** in the Dokploy app UI. Same result;
+the persistent volume is untouched.
