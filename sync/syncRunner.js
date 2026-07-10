@@ -1,146 +1,197 @@
 /**
- * This file is already complete — you do not need to edit it.
+ * Core orchestration: fetch Notion pages, then fan each one out to every
+ * destination.
  *
- * Read through it to understand the overall flow, but don't worry if you don't
- * understand every line. Focus on the three numbered steps in the comments below
- * and how they connect the files you ARE implementing.
+ * Two kinds of destination:
+ *   - MIRROR sinks (Google Calendar, Discord scheduled events): kept exactly in
+ *     sync with Notion every run — created, updated, and deleted to match.
+ *   - ANNOUNCE-ONCE sinks (LinkedIn, Facebook, Instagram): fire once, only after
+ *     a human ✅-confirms in Discord, and only when that platform is configured.
  *
- * Some syntax here (like Object.entries, Set, and arrow functions) may be new —
- * that's fine. Follow the flow at a high level:
- *   1. Fetch pages from Notion        → your fetchNotion.js
- *   2. Detect deleted pages           → calls your deleteEvent()
- *   3. Create or update each page     → calls your mapFields.js and createEvent/updateEvent()
+ * Everything except the Google Calendar mirror is gated by the Notion `Announce`
+ * checkbox. Social sinks whose credentials are absent are completely inert.
  */
 
 const { fetchNotionPages } = require('./fetchNotion');
 const { mapNotionToGoogleEvent } = require('./mapFields');
 const { createEvent, updateEvent, deleteEvent } = require('./googleCalendar');
+const { mapNotionToDiscordEvent } = require('./mapDiscord');
+const {
+  createScheduledEvent,
+  updateScheduledEvent,
+  deleteScheduledEvent,
+} = require('./discordEvents');
+const { isConfigured: discordConfigured } = require('../auth/discord');
+const { announceOnce } = require('./announce');
 const { loadState, saveState } = require('./stateManager');
 
-// A helper that returns the current time as a formatted string: [YYYY-MM-DD HH:MM:SS]
-// .toISOString() gives "2026-05-01T10:00:00.000Z", we clean it up for readability.
+// The announce-once social platforms. Adding another is one file + one entry here.
+const SOCIAL_PLATFORMS = [
+  require('./platforms/linkedin'),
+  require('./platforms/facebook'),
+  require('./platforms/instagram'),
+];
+
 function timestamp() {
   return new Date().toISOString().replace('T', ' ').substring(0, 19);
 }
 
-// The main sync function — called on startup and every 30 minutes by index.js.
-// It's async because it makes many API calls (fetch, create, update, delete).
+function isAnnounced(page) {
+  return page.properties?.Announce?.checkbox === true;
+}
+
 async function runSync() {
   console.log(`[${timestamp()}] Sync started`);
 
-  // These counters track what happened during the sync for the summary log at the end.
   let created = 0;
   let updated = 0;
   let deleted = 0;
   let skipped = 0;
+  // Discord scheduled-event mirror counters.
+  let dCreated = 0;
+  let dUpdated = 0;
+  let dDeleted = 0;
+  // Social announce-once counters (staged for approval / published / waiting on ✅).
+  let staged = 0;
+  let published = 0;
 
-  // Load the saved { notionPageId: googleEventId } map from sync-state.json.
-  // On the very first run this returns {}, which is fine.
-  let syncState = loadState();
+  const syncState = loadState();
 
   // --- Step 1: Fetch all current Notion pages ---
-  // We wrap this in try/catch because if the fetch fails (e.g. bad token, network error)
-  // we should abort the whole run — we can't safely detect deletions without the full list.
   let pages;
   try {
-    pages = await fetchNotionPages(); // calls YOUR fetchNotion.js
+    pages = await fetchNotionPages();
     console.log(`[${timestamp()}] Fetched ${pages.length} pages from Notion`);
   } catch (err) {
     console.error(`[${timestamp()}] Failed to fetch Notion pages:`, err.message);
-    return; // abort this run entirely
+    return;
   }
 
-  // Build a Set of all Notion page IDs that currently exist.
-  // A Set is like an array but optimised for fast "does this exist?" lookups.
-  // .map((p) => p.id) is an arrow function — it's shorthand for:
-  //   pages.map(function(p) { return p.id; })
-  // It creates a new array of just the IDs from the pages array.
   const notionPageIds = new Set(pages.map((p) => p.id));
+  const discordOn = discordConfigured();
 
-  // --- Step 2: Detect deleted Notion pages and remove their Google events ---
-  // Object.entries(syncState) converts { key: value, ... } into an array of [key, value] pairs.
-  // for...of loops over each pair. The [notionId, googleEventId] pulls them apart in one step
-  // (this is called "destructuring" — like unpacking a pair of values at once).
-  //
-  // Any notionId in syncState that is NOT in the current notionPageIds was deleted from Notion.
-  for (const [notionId, googleEventId] of Object.entries(syncState)) {
-    if (!notionPageIds.has(notionId)) {
+  // --- Step 2: Handle Notion pages that were deleted — remove mirror events ---
+  for (const [notionId, pageState] of Object.entries(syncState)) {
+    if (notionPageIds.has(notionId)) continue;
+
+    if (pageState.google) {
       try {
-        await deleteEvent(googleEventId); // calls YOUR googleCalendar.js
-        console.log(
-          `[${timestamp()}] Deleted: Google event ${googleEventId} (Notion page was removed)`
-        );
-        // Remove this entry from syncState so it's not saved back to the file
-        delete syncState[notionId];
+        await deleteEvent(pageState.google);
+        console.log(`[${timestamp()}] Deleted Google event (Notion page removed)`);
         deleted++;
       } catch (err) {
-        // One failed deletion should not abort the whole run — log and continue
-        console.error(
-          `[${timestamp()}] Failed to delete event ${googleEventId}:`,
-          err.message
-        );
+        console.error(`[${timestamp()}] Failed to delete Google event:`, err.message);
       }
     }
+    if (pageState.discord && discordOn) {
+      try {
+        await deleteScheduledEvent(pageState.discord);
+        console.log(`[${timestamp()}] Cancelled Discord event (Notion page removed)`);
+        dDeleted++;
+      } catch (err) {
+        console.error(`[${timestamp()}] Failed to cancel Discord event:`, err.message);
+      }
+    }
+    delete syncState[notionId];
   }
 
-  // --- Step 3: Create or update Google events for all current Notion pages ---
+  // --- Step 3: Create/update/announce for every current Notion page ---
   for (const page of pages) {
-    // Transform the Notion page into a Google Calendar event object.
-    // This calls YOUR mapFields.js — if it returns null, the page has no date.
-    const eventData = mapNotionToGoogleEvent(page);
+    const pageState = syncState[page.id] || (syncState[page.id] = {});
 
+    // 3a. Google Calendar mirror (always, not gated by Announce).
+    const eventData = mapNotionToGoogleEvent(page);
     if (!eventData) {
-      // mapFields returned null — page has no date set, skip it
       const name = page.properties.Name?.title?.[0]?.plain_text || page.id;
       console.log(`[${timestamp()}] Skipping page "${name}": no date set.`);
       skipped++;
-      continue; // move to the next page in the loop
-    }
-
-    // Check if this Notion page has been synced before.
-    // If syncState has its ID as a key, we have an existing Google event to update.
-    const existingGoogleId = syncState[page.id];
-
-    if (existingGoogleId) {
-      // Page was synced before — update the existing Google event in place.
-      // updateEvent returns the live event id: the same id normally, or a new
-      // one if the old event was deleted in Google and had to be recreated.
+    } else if (pageState.google) {
       try {
-        const liveGoogleId = await updateEvent(existingGoogleId, eventData); // calls YOUR googleCalendar.js
-        if (liveGoogleId !== existingGoogleId) {
-          syncState[page.id] = liveGoogleId; // remember the recreated event's id
+        const liveId = await updateEvent(pageState.google, eventData);
+        if (liveId !== pageState.google) {
+          pageState.google = liveId;
           console.log(`[${timestamp()}] Recreated (was deleted in Google): "${eventData.summary}"`);
         } else {
           console.log(`[${timestamp()}] Updated: "${eventData.summary}"`);
         }
         updated++;
       } catch (err) {
-        console.error(
-          `[${timestamp()}] Failed to update "${eventData.summary}":`,
-          err.message
-        );
+        console.error(`[${timestamp()}] Failed to update "${eventData.summary}":`, err.message);
       }
     } else {
-      // New page — create a Google Calendar event and remember the ID mapping
       try {
-        const newGoogleId = await createEvent(eventData); // calls YOUR googleCalendar.js
-        syncState[page.id] = newGoogleId; // store the mapping for next time
+        pageState.google = await createEvent(eventData);
         console.log(`[${timestamp()}] Created: "${eventData.summary}"`);
         created++;
       } catch (err) {
-        console.error(
-          `[${timestamp()}] Failed to create "${eventData.summary}":`,
-          err.message
-        );
+        console.error(`[${timestamp()}] Failed to create "${eventData.summary}":`, err.message);
+      }
+    }
+
+    const announced = isAnnounced(page);
+    const title = page.properties.Name?.title?.[0]?.plain_text || page.id;
+
+    // 3b. Discord scheduled-event mirror — gated by Announce, only if configured.
+    if (discordOn) {
+      if (announced) {
+        const discordPayload = mapNotionToDiscordEvent(page);
+        if (discordPayload) {
+          try {
+            if (pageState.discord) {
+              const liveId = await updateScheduledEvent(pageState.discord, discordPayload);
+              if (liveId !== pageState.discord) pageState.discord = liveId;
+              console.log(`[${timestamp()}] Discord event updated: "${title}"`);
+              dUpdated++;
+            } else {
+              pageState.discord = await createScheduledEvent(discordPayload);
+              console.log(`[${timestamp()}] Discord event created: "${title}"`);
+              dCreated++;
+            }
+          } catch (err) {
+            console.error(`[${timestamp()}] Discord event failed for "${title}":`, err.message);
+          }
+        }
+      } else if (pageState.discord) {
+        // Announce was unticked → cancel the Discord event.
+        try {
+          await deleteScheduledEvent(pageState.discord);
+          delete pageState.discord;
+          console.log(`[${timestamp()}] Discord event cancelled (Announce unticked): "${title}"`);
+          dDeleted++;
+        } catch (err) {
+          console.error(`[${timestamp()}] Failed to cancel Discord event for "${title}":`, err.message);
+        }
+      }
+    }
+
+    // 3c. Social announce-once sinks — gated by Announce; inert if unconfigured.
+    if (announced) {
+      for (const platform of SOCIAL_PLATFORMS) {
+        try {
+          const result = await announceOnce(page, platform, pageState);
+          if (result.action === 'staged') {
+            console.log(`[${timestamp()}] ${platform.label} preview staged for approval: "${title}"`);
+            staged++;
+          } else if (result.action === 'published') {
+            console.log(`[${timestamp()}] ${platform.label} published: "${title}"`);
+            published++;
+          } else if (result.action === 'failed') {
+            console.error(`[${timestamp()}] ${platform.label} publish failed for "${title}": ${result.error}`);
+          }
+        } catch (err) {
+          // A social sink must never abort the run.
+          console.error(`[${timestamp()}] ${platform.label} error for "${title}":`, err.message);
+        }
       }
     }
   }
 
-  // Save the updated ID map back to sync-state.json for the next run
   saveState(syncState);
 
   console.log(
-    `[${timestamp()}] Sync complete. Created: ${created}, Updated: ${updated}, Deleted: ${deleted}, Skipped: ${skipped}`
+    `[${timestamp()}] Sync complete. Created: ${created}, Updated: ${updated}, Deleted: ${deleted}, Skipped: ${skipped}` +
+      ` | Discord +${dCreated}/~${dUpdated}/-${dDeleted}` +
+      ` | Social staged: ${staged}, published: ${published}`
   );
 }
 
