@@ -71,7 +71,12 @@ function mapNotionToGoogleEvent(page) {
 
   
   const caption = props['🔹 Caption']?.rollup?.array?.[0]?.rich_text?.[0]?.plain_text;
-  const registrationLink = props['🔹 Registration Link']?.rollup?.array?.[0]?.url;
+  const rawRegistrationLink = props['🔹 Registration Link']?.rollup?.array?.[0]?.url;
+
+  // Prepend https:// if the link has no scheme, so Google Calendar renders it as a clickable link.
+  const registrationLink = rawRegistrationLink
+    ? (/^https?:\/\//i.test(rawRegistrationLink) ? rawRegistrationLink : `https://${rawRegistrationLink}`)
+    : null;
 
   const descriptionParts = [
     caption,
