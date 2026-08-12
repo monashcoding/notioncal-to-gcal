@@ -14,12 +14,6 @@ async function fetchNotionPages() {
 
       filter: {
         and: [
-          {
-            or: [
-              { property: "Type", select: { equals: "Social" } },
-              { property: "Type", select: { equals: "Event" } }
-            ]
-          },
           { property: "Timeline", date: { on_or_after: cutoff } },
           { property: "🔹 Sync to Public Calendar", rollup: { any: { checkbox: { equals: true } } } }
         ]
