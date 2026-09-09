@@ -40,11 +40,22 @@ sync/syncRunner.js        # Core orchestration: fetch → diff → create/update
 ### Field mapping is isolated
 All Notion → Google Calendar field translation lives in `sync/mapFields.js`. Adding a new field (e.g. Location, registration link, caption) only requires editing that one file — never touching `syncRunner.js`.
 
+### How an event's start/end time is resolved
+`resolveEventTimes()` in `sync/mapFields.js` is the single source of truth, shared by both the Google and Discord sinks. It prefers, in order:
+
+1. **A time on the Timeline date itself** — structured, carries its own timezone, expresses multi-day ranges natively. Preferred for all new events.
+2. **The `Event Start Time` / `Event End Time` text fields** — free text, so AM/PM has to be inferred. Legacy fallback.
+
+`buildDateTime()` defaults bare numbers to **PM** (`"6"` → 6pm), which is right for this calendar's mostly-evening events but wrong for mornings. That reading is overridden only when it is provably impossible — i.e. it would put the end at or before the start. If the times can't be made valid, both are dropped and the event syncs as all-day, so a malformed time field can never block the *date* from updating.
+
+### Which pages sync
+`isSyncEnabled()` in `sync/fetchNotion.js` checks the `🔹 Sync to Public Calendar` rollup, which lives on the **related marketing ticket**, not the calendar page. A page can look complete in Notion and still be invisible to sync. Eligibility is evaluated in code rather than as a Notion query filter so the runner can tell "not marked for sync" apart from "deleted in Notion" and log which applies.
+
 ### Sync state
 `sync-state.json` (project root, gitignored) is a flat `{ notionPageId: googleEventId }` map. It is loaded at the start of each run and written back after every mutation. No database required.
 
 ### Deletion detection
-After fetching current Notion pages, their IDs are collected into a Set. Any key in `sync-state.json` that is absent from that Set is treated as deleted: the corresponding Google event is removed and the key is dropped from state.
+After fetching, the *eligible* page IDs are collected into a Set. Any key in `sync-state.json` absent from that Set has its mirrors removed and the key dropped from state. The log names which of the two causes applies — the page was removed from Notion, or it is no longer marked `🔹 Sync to Public Calendar`.
 
 ### Authentication
 - **Notion:** `NOTION_TOKEN` env var → `@notionhq/client`.
@@ -76,5 +87,6 @@ Sync complete. Created: N, Updated: N, Deleted: N, Skipped: N
 - `require('dotenv').config()` must be the **first line** in `index.js` so env vars are available before any module loads.
 - Google Calendar all-day events use `date` format (`YYYY-MM-DD`), not `dateTime`. Using `dateTime` will break all-day display.
 - Notion pages with a null/missing `Timeline` property are **skipped** (not errored). A warning is logged.
-- A single event failure must not crash the run — each create/update/delete is wrapped in its own try/catch.
+- A single event failure must not crash the run — each create/update/delete is wrapped in its own try/catch. Note this also means a persistently rejected event fails *silently* every run; `updateEvent` only patches when something actually differs, so a change in the log is a real change.
+- Google rejects an event whose end is at or before its start with `400 The specified time range is empty`.
 - Notion API rate limit is 3 req/s. Not a concern for a small calendar, but batch carefully if the database grows.
