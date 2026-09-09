@@ -12,7 +12,7 @@
  * checkbox. Social sinks whose credentials are absent are completely inert.
  */
 
-const { fetchNotionPages } = require('./fetchNotion');
+const { fetchNotionPages, isSyncEnabled, SYNC_PROPERTY } = require('./fetchNotion');
 const { mapNotionToGoogleEvent } = require('./mapFields');
 const { createEvent, updateEvent, deleteEvent } = require('./googleCalendar');
 const { mapNotionToDiscordEvent } = require('./mapDiscord');
@@ -47,6 +47,11 @@ async function runSync() {
   let updated = 0;
   let deleted = 0;
   let skipped = 0;
+  // Events already matching Notion — no write made. Kept separate from
+  // `updated` so the log shows when a value actually moved.
+  let unchanged = 0;
+  // Pages present in Notion but not ticked for the public calendar.
+  let unmarked = 0;
   // Discord scheduled-event mirror counters.
   let dCreated = 0;
   let dUpdated = 0;
@@ -67,17 +72,32 @@ async function runSync() {
     return;
   }
 
-  const notionPageIds = new Set(pages.map((p) => p.id));
+  // Eligibility is decided here rather than by the Notion query, so a page that
+  // is simply not ticked for sync is distinguishable from one that was deleted.
+  const eligible = pages.filter(isSyncEnabled);
+  const fetchedPageIds = new Set(pages.map((p) => p.id));
+  const eligiblePageIds = new Set(eligible.map((p) => p.id));
+  console.log(
+    `[${timestamp()}] ${eligible.length} of ${pages.length} pages marked "${SYNC_PROPERTY}"`
+  );
   const discordOn = discordConfigured();
 
   // --- Step 2: Handle Notion pages that were deleted — remove mirror events ---
   for (const [notionId, pageState] of Object.entries(syncState)) {
-    if (notionPageIds.has(notionId)) continue;
+    if (eligiblePageIds.has(notionId)) continue;
+
+    // Say which of the two reasons applies — "the page is gone" and "someone
+    // unticked the sync checkbox" produce identical cleanup but very different
+    // conversations afterwards.
+    const reason = fetchedPageIds.has(notionId)
+      ? `no longer marked "${SYNC_PROPERTY}"`
+      : 'removed from Notion';
+    console.log(`[${timestamp()}] Removing mirrors for ${notionId}: ${reason}`);
 
     if (pageState.google) {
       try {
         await deleteEvent(pageState.google);
-        console.log(`[${timestamp()}] Deleted Google event (Notion page removed)`);
+        console.log(`[${timestamp()}] Deleted Google event (${reason})`);
         deleted++;
       } catch (err) {
         console.error(`[${timestamp()}] Failed to delete Google event:`, err.message);
@@ -86,7 +106,7 @@ async function runSync() {
     if (pageState.discord && discordOn) {
       try {
         await deleteScheduledEvent(pageState.discord);
-        console.log(`[${timestamp()}] Cancelled Discord event (Notion page removed)`);
+        console.log(`[${timestamp()}] Cancelled Discord event (${reason})`);
         dDeleted++;
       } catch (err) {
         console.error(`[${timestamp()}] Failed to cancel Discord event:`, err.message);
@@ -95,8 +115,10 @@ async function runSync() {
     delete syncState[notionId];
   }
 
-  // --- Step 3: Create/update/announce for every current Notion page ---
-  for (const page of pages) {
+  unmarked = pages.length - eligible.length;
+
+  // --- Step 3: Create/update/announce for every eligible Notion page ---
+  for (const page of eligible) {
     const pageState = syncState[page.id] || (syncState[page.id] = {});
 
     // 3a. Google Calendar mirror (always, not gated by Announce).
@@ -107,14 +129,21 @@ async function runSync() {
       skipped++;
     } else if (pageState.google) {
       try {
-        const liveId = await updateEvent(pageState.google, eventData);
-        if (liveId !== pageState.google) {
-          pageState.google = liveId;
+        const result = await updateEvent(pageState.google, eventData);
+        pageState.google = result.id;
+        if (result.status === 'recreated') {
           console.log(`[${timestamp()}] Recreated (was deleted in Google): "${eventData.summary}"`);
+          updated++;
+        } else if (result.status === 'updated') {
+          // Log the before -> after for each field so a "why did this change /
+          // when did it change" question is answerable straight from the log.
+          console.log(
+            `[${timestamp()}] Updated: "${eventData.summary}" — ${result.changes.join('; ')}`
+          );
+          updated++;
         } else {
-          console.log(`[${timestamp()}] Updated: "${eventData.summary}"`);
+          unchanged++;
         }
-        updated++;
       } catch (err) {
         console.error(`[${timestamp()}] Failed to update "${eventData.summary}":`, err.message);
       }
@@ -190,6 +219,7 @@ async function runSync() {
 
   console.log(
     `[${timestamp()}] Sync complete. Created: ${created}, Updated: ${updated}, Deleted: ${deleted}, Skipped: ${skipped}` +
+      ` | Unchanged: ${unchanged}, Not marked for sync: ${unmarked}` +
       ` | Discord +${dCreated}/~${dUpdated}/-${dDeleted}` +
       ` | Social staged: ${staged}, published: ${published}`
   );

@@ -9,7 +9,7 @@
 // This file is the single place that reconciles our all-day-first Notion data
 // with those requirements. Returns null to signal "skip this page".
 
-const { buildDateTime } = require('./mapFields');
+const { resolveEventTimes } = require('./mapFields');
 
 const TIME_ZONE = 'Australia/Melbourne';
 
@@ -58,15 +58,22 @@ function mapNotionToDiscordEvent(page) {
   const startTimeStr = props['Event Start Time']?.rich_text?.[0]?.plain_text;
   const endTimeStr = props['Event End Time']?.rich_text?.[0]?.plain_text;
 
-  const startNaive =
-    buildDateTime(dateStart, startTimeStr) ||
-    defaultTime(dateStart, process.env.DISCORD_DEFAULT_START, '18:00');
+  // Shared with Google via resolveEventTimes, so an event that reads 10am-2pm on
+  // the calendar can never read 10pm-2pm on Discord.
+  const { start: resolvedStart, end: resolvedEnd } = resolveEventTimes(
+    props.Timeline?.date,
+    startTimeStr,
+    endTimeStr
+  );
 
-  let endNaive = buildDateTime(dateStart, endTimeStr);
+  const startNaive =
+    resolvedStart || defaultTime(dateStart, process.env.DISCORD_DEFAULT_START, '18:00');
+
+  let endNaive = resolvedEnd;
   if (!endNaive) {
-    // No explicit end. If there was an explicit start, add the default duration;
+    // No usable end. If there was a usable start, add the default duration;
     // otherwise use the configured default end window.
-    if (startTimeStr) {
+    if (resolvedStart) {
       const start = new Date(`${startNaive}Z`); // treat components literally
       start.setUTCHours(start.getUTCHours() + DEFAULT_DURATION_HOURS);
       endNaive = start.toISOString().replace('Z', '').split('.')[0];
