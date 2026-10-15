@@ -10,6 +10,7 @@
 // with those requirements. Returns null to signal "skip this page".
 
 const { resolveEventTimes } = require('./mapFields');
+const { getEventDate, getTitle } = require('./notionProps');
 
 const TIME_ZONE = 'Australia/Melbourne';
 
@@ -48,8 +49,9 @@ function defaultTime(dateStr, hhmm, fallback) {
 function mapNotionToDiscordEvent(page) {
   const props = page.properties;
 
-  const title = props.Name?.title?.[0]?.plain_text || '(Untitled)';
-  const dateStart = props.Timeline?.date?.start?.split('T')[0];
+  const title = getTitle(page) || '(Untitled)';
+  const eventDate = getEventDate(page);
+  const dateStart = eventDate?.start?.split('T')[0];
   if (!dateStart) return null; // no date → nothing to schedule
 
   // Resolve start/end wall-clock times. Prefer the Notion time fields (parsed
@@ -61,7 +63,7 @@ function mapNotionToDiscordEvent(page) {
   // Shared with Google via resolveEventTimes, so an event that reads 10am-2pm on
   // the calendar can never read 10pm-2pm on Discord.
   const { start: resolvedStart, end: resolvedEnd } = resolveEventTimes(
-    props.Timeline?.date,
+    eventDate,
     startTimeStr,
     endTimeStr
   );

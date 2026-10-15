@@ -1,5 +1,7 @@
 
 
+const { getEventDate, getTitle } = require('./notionProps');
+
 function addOneDay(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number);
   const next = new Date(Date.UTC(y, m - 1, d + 1));
@@ -187,11 +189,11 @@ function resolveEventTimes(timelineDate, startStr, endStr) {
 function mapNotionToGoogleEvent(page) {
   const props = page.properties;
 
-  const title = props.Name?.title?.[0]?.plain_text || '(Untitled)';
+  const title = getTitle(page) || '(Untitled)';
 
- 
-  
-  const dateStart = props.Timeline?.date?.start?.split('T')[0];
+  // Timeline or Date, whichever is filled in — see notionProps.js.
+  const eventDate = getEventDate(page);
+  const dateStart = eventDate?.start?.split('T')[0];
 
   // Bail before addOneDay, which would throw on a missing date. syncRunner calls
   // this outside its per-event try/catch, so a throw here takes down the run —
@@ -200,7 +202,7 @@ function mapNotionToGoogleEvent(page) {
 
   // Multi-day event handling. Google treats an all-day event's end date as
   // exclusive, hence addOneDay.
-  const rawDateEnd = props.Timeline?.date?.end;
+  const rawDateEnd = eventDate.end;
   const dateEnd = rawDateEnd ? rawDateEnd.split('T')[0] : null;
   const googleEndDate = dateEnd ? addOneDay(dateEnd) : addOneDay(dateStart);
 
@@ -218,7 +220,7 @@ function mapNotionToGoogleEvent(page) {
   const startTimeStr = props['Event Start Time']?.rich_text?.[0]?.plain_text;
   const endTimeStr = props['Event End Time']?.rich_text?.[0]?.plain_text;
   const { start: startDateTime, end: endDateTime, warnings } = resolveEventTimes(
-    props.Timeline?.date,
+    eventDate,
     startTimeStr,
     endTimeStr
   );

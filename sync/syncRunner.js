@@ -12,8 +12,14 @@
  * checkbox. Social sinks whose credentials are absent are completely inert.
  */
 
-const { fetchNotionPages, isSyncEnabled, SYNC_PROPERTY } = require('./fetchNotion');
+const {
+  fetchNotionPages,
+  explainMissingPage,
+  isSyncEnabled,
+  SYNC_PROPERTY,
+} = require('./fetchNotion');
 const { mapNotionToGoogleEvent } = require('./mapFields');
+const { getTitle } = require('./notionProps');
 const { createEvent, updateEvent, deleteEvent } = require('./googleCalendar');
 const { mapNotionToDiscordEvent } = require('./mapDiscord');
 const {
@@ -64,8 +70,9 @@ async function runSync() {
 
   // --- Step 1: Fetch all current Notion pages ---
   let pages;
+  let trustworthy;
   try {
-    pages = await fetchNotionPages();
+    ({ pages, trustworthy } = await fetchNotionPages());
     console.log(`[${timestamp()}] Fetched ${pages.length} pages from Notion`);
   } catch (err) {
     console.error(`[${timestamp()}] Failed to fetch Notion pages:`, err.message);
@@ -82,16 +89,38 @@ async function runSync() {
   );
   const discordOn = discordConfigured();
 
-  // --- Step 2: Handle Notion pages that were deleted — remove mirror events ---
-  for (const [notionId, pageState] of Object.entries(syncState)) {
-    if (eligiblePageIds.has(notionId)) continue;
+  // --- Step 2: Remove mirrors for pages that no longer belong on the calendar ---
+  //
+  // A synced page that came back from the query but is unticked is a confirmed
+  // removal. One that did not come back at all is only a *suspected* removal —
+  // see explainMissingPage — and is looked up before anything is deleted. If
+  // the schema itself is wrong, nothing is deleted this run; creates and
+  // updates still go ahead either way.
+  const toRemove = Object.keys(syncState).filter((id) => !eligiblePageIds.has(id));
+  if (!trustworthy && toRemove.length) {
+    console.warn(
+      `[${timestamp()}] Holding ${toRemove.length} deletion(s): the Notion database is missing ` +
+        `a property the sync relies on. Nothing has been removed from Google or Discord.`
+    );
+  }
 
-    // Say which of the two reasons applies — "the page is gone" and "someone
-    // unticked the sync checkbox" produce identical cleanup but very different
-    // conversations afterwards.
-    const reason = fetchedPageIds.has(notionId)
-      ? `no longer marked "${SYNC_PROPERTY}"`
-      : 'removed from Notion';
+  for (const notionId of trustworthy ? toRemove : []) {
+    const pageState = syncState[notionId];
+
+    // Say which reason applies — "the page is gone", "someone unticked it" and
+    // "it expired" produce identical cleanup but very different conversations
+    // afterwards.
+    let reason;
+    if (fetchedPageIds.has(notionId)) {
+      reason = `no longer marked "${SYNC_PROPERTY}"`;
+    } else {
+      const verdict = await explainMissingPage(notionId);
+      if (!verdict.remove) {
+        console.warn(`[${timestamp()}] Keeping mirrors for ${notionId}: ${verdict.reason}`);
+        continue;
+      }
+      reason = verdict.reason;
+    }
     console.log(`[${timestamp()}] Removing mirrors for ${notionId}: ${reason}`);
 
     if (pageState.google) {
@@ -119,99 +148,106 @@ async function runSync() {
 
   // --- Step 3: Create/update/announce for every eligible Notion page ---
   for (const page of eligible) {
-    const pageState = syncState[page.id] || (syncState[page.id] = {});
+    // Everything for one page is isolated: an unexpected property shape or a
+    // mapper bug must cost that one page, never the rest of the run.
+    try {
+      const pageState = syncState[page.id] || (syncState[page.id] = {});
 
-    // 3a. Google Calendar mirror (always, not gated by Announce).
-    const eventData = mapNotionToGoogleEvent(page);
-    if (!eventData) {
-      const name = page.properties.Name?.title?.[0]?.plain_text || page.id;
-      console.log(`[${timestamp()}] Skipping page "${name}": no date set.`);
-      skipped++;
-    } else if (pageState.google) {
-      try {
-        const result = await updateEvent(pageState.google, eventData);
-        pageState.google = result.id;
-        if (result.status === 'recreated') {
-          console.log(`[${timestamp()}] Recreated (was deleted in Google): "${eventData.summary}"`);
-          updated++;
-        } else if (result.status === 'updated') {
-          // Log the before -> after for each field so a "why did this change /
-          // when did it change" question is answerable straight from the log.
-          console.log(
-            `[${timestamp()}] Updated: "${eventData.summary}" — ${result.changes.join('; ')}`
-          );
-          updated++;
-        } else {
-          unchanged++;
+      // 3a. Google Calendar mirror (always, not gated by Announce).
+      const eventData = mapNotionToGoogleEvent(page);
+      if (!eventData) {
+        const name = getTitle(page) || page.id;
+        console.log(`[${timestamp()}] Skipping page "${name}": no date set.`);
+        skipped++;
+      } else if (pageState.google) {
+        try {
+          const result = await updateEvent(pageState.google, eventData);
+          pageState.google = result.id;
+          if (result.status === 'recreated') {
+            console.log(`[${timestamp()}] Recreated (was deleted in Google): "${eventData.summary}"`);
+            updated++;
+          } else if (result.status === 'updated') {
+            // Log the before -> after for each field so a "why did this change /
+            // when did it change" question is answerable straight from the log.
+            console.log(
+              `[${timestamp()}] Updated: "${eventData.summary}" — ${result.changes.join('; ')}`
+            );
+            updated++;
+          } else {
+            unchanged++;
+          }
+        } catch (err) {
+          console.error(`[${timestamp()}] Failed to update "${eventData.summary}":`, err.message);
         }
-      } catch (err) {
-        console.error(`[${timestamp()}] Failed to update "${eventData.summary}":`, err.message);
+      } else {
+        try {
+          pageState.google = await createEvent(eventData);
+          console.log(`[${timestamp()}] Created: "${eventData.summary}"`);
+          created++;
+        } catch (err) {
+          console.error(`[${timestamp()}] Failed to create "${eventData.summary}":`, err.message);
+        }
       }
-    } else {
-      try {
-        pageState.google = await createEvent(eventData);
-        console.log(`[${timestamp()}] Created: "${eventData.summary}"`);
-        created++;
-      } catch (err) {
-        console.error(`[${timestamp()}] Failed to create "${eventData.summary}":`, err.message);
-      }
-    }
 
-    const announced = isAnnounced(page);
-    const title = page.properties.Name?.title?.[0]?.plain_text || page.id;
+      const announced = isAnnounced(page);
+      const title = getTitle(page) || page.id;
 
-    // 3b. Discord scheduled-event mirror — gated by Announce, only if configured.
-    if (discordOn) {
-      if (announced) {
-        const discordPayload = mapNotionToDiscordEvent(page);
-        if (discordPayload) {
+      // 3b. Discord scheduled-event mirror — gated by Announce, only if configured.
+      if (discordOn) {
+        if (announced) {
+          const discordPayload = mapNotionToDiscordEvent(page);
+          if (discordPayload) {
+            try {
+              if (pageState.discord) {
+                const liveId = await updateScheduledEvent(pageState.discord, discordPayload);
+                if (liveId !== pageState.discord) pageState.discord = liveId;
+                console.log(`[${timestamp()}] Discord event updated: "${title}"`);
+                dUpdated++;
+              } else {
+                pageState.discord = await createScheduledEvent(discordPayload);
+                console.log(`[${timestamp()}] Discord event created: "${title}"`);
+                dCreated++;
+              }
+            } catch (err) {
+              console.error(`[${timestamp()}] Discord event failed for "${title}":`, err.message);
+            }
+          }
+        } else if (pageState.discord) {
+          // Announce was unticked → cancel the Discord event.
           try {
-            if (pageState.discord) {
-              const liveId = await updateScheduledEvent(pageState.discord, discordPayload);
-              if (liveId !== pageState.discord) pageState.discord = liveId;
-              console.log(`[${timestamp()}] Discord event updated: "${title}"`);
-              dUpdated++;
-            } else {
-              pageState.discord = await createScheduledEvent(discordPayload);
-              console.log(`[${timestamp()}] Discord event created: "${title}"`);
-              dCreated++;
+            await deleteScheduledEvent(pageState.discord);
+            delete pageState.discord;
+            console.log(`[${timestamp()}] Discord event cancelled (Announce unticked): "${title}"`);
+            dDeleted++;
+          } catch (err) {
+            console.error(`[${timestamp()}] Failed to cancel Discord event for "${title}":`, err.message);
+          }
+        }
+      }
+
+      // 3c. Social announce-once sinks — gated by Announce; inert if unconfigured.
+      if (announced) {
+        for (const platform of SOCIAL_PLATFORMS) {
+          try {
+            const result = await announceOnce(page, platform, pageState);
+            if (result.action === 'staged') {
+              console.log(`[${timestamp()}] ${platform.label} preview staged for approval: "${title}"`);
+              staged++;
+            } else if (result.action === 'published') {
+              console.log(`[${timestamp()}] ${platform.label} published: "${title}"`);
+              published++;
+            } else if (result.action === 'failed') {
+              console.error(`[${timestamp()}] ${platform.label} publish failed for "${title}": ${result.error}`);
             }
           } catch (err) {
-            console.error(`[${timestamp()}] Discord event failed for "${title}":`, err.message);
+            // A social sink must never abort the run.
+            console.error(`[${timestamp()}] ${platform.label} error for "${title}":`, err.message);
           }
         }
-      } else if (pageState.discord) {
-        // Announce was unticked → cancel the Discord event.
-        try {
-          await deleteScheduledEvent(pageState.discord);
-          delete pageState.discord;
-          console.log(`[${timestamp()}] Discord event cancelled (Announce unticked): "${title}"`);
-          dDeleted++;
-        } catch (err) {
-          console.error(`[${timestamp()}] Failed to cancel Discord event for "${title}":`, err.message);
-        }
       }
-    }
-
-    // 3c. Social announce-once sinks — gated by Announce; inert if unconfigured.
-    if (announced) {
-      for (const platform of SOCIAL_PLATFORMS) {
-        try {
-          const result = await announceOnce(page, platform, pageState);
-          if (result.action === 'staged') {
-            console.log(`[${timestamp()}] ${platform.label} preview staged for approval: "${title}"`);
-            staged++;
-          } else if (result.action === 'published') {
-            console.log(`[${timestamp()}] ${platform.label} published: "${title}"`);
-            published++;
-          } else if (result.action === 'failed') {
-            console.error(`[${timestamp()}] ${platform.label} publish failed for "${title}": ${result.error}`);
-          }
-        } catch (err) {
-          // A social sink must never abort the run.
-          console.error(`[${timestamp()}] ${platform.label} error for "${title}":`, err.message);
-        }
-      }
+    } catch (err) {
+      // Log by id only: reading the page's properties may be what just threw.
+      console.error(`[${timestamp()}] Failed to sync page ${page.id}:`, err.message);
     }
   }
 

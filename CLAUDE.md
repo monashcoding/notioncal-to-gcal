@@ -32,6 +32,7 @@ sync/fetchNotion.js       # Fetch all pages from the Notion database
 sync/mapFields.js         # Transform a Notion page → Google Calendar event object
 sync/googleCalendar.js    # create / update / delete event wrappers
 sync/stateManager.js      # load / save sync-state.json
+sync/notionProps.js       # Rename-tolerant property readers (event date, title)
 sync/syncRunner.js        # Core orchestration: fetch → diff → create/update/delete
 ```
 
@@ -54,8 +55,23 @@ All Notion → Google Calendar field translation lives in `sync/mapFields.js`. A
 ### Sync state
 `sync-state.json` (project root, gitignored) is a flat `{ notionPageId: googleEventId }` map. It is loaded at the start of each run and written back after every mutation. No database required.
 
+### Notion property names are not trusted
+People rename properties in the Notion UI, so code never reads a property by one hard-coded name where it can avoid it. `sync/notionProps.js` owns this:
+- **Event date:** `getEventDate()` reads the first *filled-in* date property named `Timeline` or `Date` (case-insensitive, ignoring Notion's ` (1)` duplicate suffix). Add names to `DATE_PROPERTY_NAMES`.
+- **Title:** `getTitle()` finds the database's single `title`-type property, whatever it is called.
+
+`fetchNotionPages()` builds its date filter from the live schema (an `or` across whichever date properties exist) because filtering on a missing property makes Notion reject the whole query. With no date property at all it fetches unfiltered. It returns `{ pages, trustworthy }`, where `trustworthy` is false if the date or sync property is missing.
+
 ### Deletion detection
 After fetching, the *eligible* page IDs are collected into a Set. Any key in `sync-state.json` absent from that Set has its mirrors removed and the key dropped from state. The log names which of the two causes applies — the page was removed from Notion, or it is no longer marked `🔹 Sync to Public Calendar`.
+
+**Absence from the query is never treated as deletion on its own.** A renamed property once made the query return 0 pages, and the runner deleted the whole calendar. Now:
+- A page that came back unticked → mirrors removed.
+- A page that did not come back → `explainMissingPage()` in `sync/fetchNotion.js` looks it up directly. Mirrors are removed only if it is trashed or gone, unticked, or **more than a year old**. Otherwise they are kept and the log line `Keeping mirrors for <id>: <why>` explains why. That includes pages with no readable date, so a broken date column can't empty the calendar. A failed lookup is retried next run.
+- If the fetch is not `trustworthy`, nothing is deleted that run.
+
+### Retention
+The query fetches events starting within the last year (`retentionCutoff()`, a rolling window). Older events age out of Google/Discord one at a time as they pass the one-year mark; there is no manual cleanup step.
 
 ### Authentication
 - **Notion:** `NOTION_TOKEN` env var → `@notionhq/client`.
@@ -73,7 +89,6 @@ All vars live in `.env` (see `.env.example`):
 | `GOOGLE_CLIENT_SECRET` | OAuth 2.0 client secret |
 | `GOOGLE_REDIRECT_URI` | `http://localhost:3000/auth/callback` |
 | `GOOGLE_CALENDAR_ID` | Target calendar ID (not "primary") |
-
 ## Logging convention
 
 Every log line is prefixed with a timestamp: `[YYYY-MM-DD HH:MM:SS]`. The sync run summary format is:
@@ -86,7 +101,7 @@ Sync complete. Created: N, Updated: N, Deleted: N, Skipped: N
 
 - `require('dotenv').config()` must be the **first line** in `index.js` so env vars are available before any module loads.
 - Google Calendar all-day events use `date` format (`YYYY-MM-DD`), not `dateTime`. Using `dateTime` will break all-day display.
-- Notion pages with a null/missing `Timeline` property are **skipped** (not errored). A warning is logged.
-- A single event failure must not crash the run — each create/update/delete is wrapped in its own try/catch. Note this also means a persistently rejected event fails *silently* every run; `updateEvent` only patches when something actually differs, so a change in the log is a real change.
+- Notion pages with no `Timeline`/`Date` value are **skipped** (not errored). A warning is logged.
+- A single event failure must not crash the run — each page's whole sync is wrapped in a try/catch, as is each create/update/delete, and `index.js` catches anything that escapes `runSync()` so the process (and its schedule) survives. Note this also means a persistently rejected event fails *silently* every run; `updateEvent` only patches when something actually differs, so a change in the log is a real change.
 - Google rejects an event whose end is at or before its start with `400 The specified time range is empty`.
 - Notion API rate limit is 3 req/s. Not a concern for a small calendar, but batch carefully if the database grows.
