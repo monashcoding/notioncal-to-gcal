@@ -38,12 +38,22 @@ if (!fs.existsSync(tokensPath)) {
 const tokens = JSON.parse(fs.readFileSync(tokensPath, 'utf8'));
 setStoredTokens(tokens);
 
+// Never let one failed run take the process down. An unhandled rejection exits
+// Node, and with it every future scheduled run — so a single bad sync would
+// otherwise stop the calendar updating until someone restarted the container.
+function safeRunSync() {
+  return runSync().catch((err) => {
+    const ts = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    console.error(`[${ts}] Sync run failed:`, err);
+  });
+}
+
 // Run the sync immediately when the app starts — don't make it wait 30 minutes.
-runSync();
+safeRunSync();
 
 // Schedule the sync to run every 30 minutes using a cron expression.
 // Cron expressions have 5 fields: minute, hour, day-of-month, month, day-of-week
 //   */30 * * * *  means "every 30 minutes, every hour, every day"
 //   The */N syntax means "every N units" — so */30 means every 30 minutes.
 // Try it interactively: https://crontab.guru/#*/30_*_*_*_*
-cron.schedule('*/30 * * * *', runSync);
+cron.schedule('*/30 * * * *', safeRunSync);

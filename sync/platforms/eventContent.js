@@ -1,6 +1,8 @@
 // Shared extraction of the "postable" content of a Notion event, used by every
 // social platform module so caption/image logic lives in one place.
 
+const { getEventDate, getTitle } = require('../notionProps');
+
 function normalizeUrl(u) {
   if (!u) return null;
   return /^https?:\/\//i.test(u) ? u : `https://${u}`;
@@ -23,9 +25,9 @@ function getImageUrl(page) {
 function getEventContent(page) {
   const props = page.properties;
   return {
-    title: props.Name?.title?.[0]?.plain_text || '(Untitled)',
+    title: getTitle(page) || '(Untitled)',
     caption: props['🔹 Caption']?.rollup?.array?.[0]?.rich_text?.[0]?.plain_text || '',
-    dateStart: props.Timeline?.date?.start?.split('T')[0] || null,
+    dateStart: getEventDate(page)?.start?.split('T')[0] || null,
     venue: props['Venue']?.rich_text?.[0]?.plain_text || '',
     registrationLink: normalizeUrl(props['🔹 Registration Link']?.rollup?.array?.[0]?.url),
     imageUrl: getImageUrl(page),
